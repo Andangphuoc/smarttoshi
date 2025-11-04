@@ -13,13 +13,19 @@ export default defineConfig(({ mode }) => {
       },
       plugins: [react()],
       define: {
-        'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-        'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY)
+        // Prefer environment variables provided at build time (e.g. by Vercel).
+        // If not present, fall back to .env files loaded by loadEnv.
+        'process.env.API_KEY': JSON.stringify(process.env.GEMINI_API_KEY || env.GEMINI_API_KEY),
+        'process.env.GEMINI_API_KEY': JSON.stringify(process.env.GEMINI_API_KEY || env.GEMINI_API_KEY)
       },
       resolve: {
         alias: {
           '@': path.resolve(__dirname, '.'),
         }
+      }
+      ,
+      build: {
+        outDir: 'dist'
       }
     };
 });
