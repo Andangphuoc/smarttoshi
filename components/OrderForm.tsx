@@ -101,14 +101,14 @@ const OrderForm: React.FC<OrderFormProps> = ({ pair, onSave, onClose, currentEth
             <span className="text-gray-400">Est. Liq. Price (Short):</span>
             <span className="font-mono text-white">{info.shortLiq ? formatCurrency(info.shortLiq) : 'N/A'}</span>
          </div>
-         <div className="flex justify-between items-center pt-2 border-t border-gray-700">
-            <span className="text-gray-400">Safety Buffer:</span>
-             {info.isSafe ? (
-                <span className="font-bold text-green-400 flex items-center"><i className="fas fa-check-circle mr-1"></i> Safe Zone ({info.buffer?.toFixed(0)} price points)</span>
-             ) : (
-                <span className="font-bold text-red-400 flex items-center"><i className="fas fa-exclamation-triangle mr-1"></i> High Risk ({info.buffer?.toFixed(0)} price points)</span>
-             )}
-         </div>
+      <div className="flex justify-between items-center pt-2 border-t border-gray-700">
+        <span className="text-gray-400">Buffer to Liquidation (price points):</span>
+        {info.isSafe ? (
+          <span className="font-bold text-green-400 flex items-center"><i className="fas fa-check-circle mr-1"></i> {info.buffer?.toFixed(0)}</span>
+        ) : (
+          <span className="font-bold text-red-400 flex items-center"><i className="fas fa-exclamation-triangle mr-1"></i> {info.buffer?.toFixed(0)}</span>
+        )}
+      </div>
       </div>
     );
   };

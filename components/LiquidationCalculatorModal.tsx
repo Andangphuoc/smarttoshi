@@ -9,6 +9,8 @@ interface LiquidationCalculatorModalProps {
 
 type CalculationResult = {
   side: 'Long' | 'Short';
+  sideA?: 'Long' | 'Short';
+  sideB?: 'Long' | 'Short';
   liqPrice: number | null;
   buffer: number | null;
   isSafe: boolean;
@@ -16,15 +18,19 @@ type CalculationResult = {
   canOpenB: boolean;
   maintenanceA?: number;
   maintenanceB?: number;
-  safetyA?: number;
-  safetyB?: number;
   effectiveA?: number;
   effectiveB?: number;
   marginRequired?: number;
+  marginRequiredA?: number;
+  marginRequiredB?: number;
   distanceA?: number;
   distanceB?: number;
   pctA?: number;
   pctB?: number;
+  rangeAStart?: number;
+  rangeAEnd?: number;
+  rangeBStart?: number;
+  rangeBEnd?: number;
 } | null;
 
 const LiquidationCalculatorModal: React.FC<LiquidationCalculatorModalProps> = ({ isOpen, onClose, currentEthPrice }) => {
@@ -32,7 +38,7 @@ const LiquidationCalculatorModal: React.FC<LiquidationCalculatorModalProps> = ({
   const [balanceB, setBalanceB] = useState(1000);
   const [quantity, setQuantity] = useState(1);
   const [maintenancePercent, setMaintenancePercent] = useState(0.5); // %
-  const [safetyPercent, setSafetyPercent] = useState(30); // % (30% safety buffer)
+  const [feePercent, setFeePercent] = useState(0.1); // % (e.g., 0.1 means 0.1% fee rate)
   const [result, setResult] = useState<CalculationResult>(null);
 
   const leverage = 100;
@@ -46,41 +52,56 @@ const LiquidationCalculatorModal: React.FC<LiquidationCalculatorModalProps> = ({
     const entryPrice = currentEthPrice;
     const marginRequired = (entryPrice * quantity) / leverage;
 
-    const infoA: any = calculateLiquidationInfo(balanceA, entryPrice, quantity, leverage, maintenancePercent, safetyPercent);
-    const infoB: any = calculateLiquidationInfo(balanceB, entryPrice, quantity, leverage, maintenancePercent, safetyPercent);
+  const feeRate = feePercent / 100;
+  const infoA: any = calculateLiquidationInfo(balanceA, entryPrice, quantity, leverage, maintenancePercent, feeRate);
+  const infoB: any = calculateLiquidationInfo(balanceB, entryPrice, quantity, leverage, maintenancePercent, feeRate);
 
   const liqPrice = side === 'Long' ? infoA.longLiq : infoA.shortLiq;
   const buffer = side === 'Long' ? Math.abs(entryPrice - (infoA.longLiq || 0)) : Math.abs(entryPrice - (infoA.shortLiq || 0));
 
   // distance and percent to liquidation for each exchange
+  // Hedging: Aivora uses selected side, Bitunix uses the opposite side
   const liqA = side === 'Long' ? infoA.longLiq : infoA.shortLiq;
-  const liqB = side === 'Long' ? infoB.longLiq : infoB.shortLiq;
+  const liqB = side === 'Long' ? infoB.shortLiq : infoB.longLiq;
   const distanceA = liqA != null ? Math.abs(entryPrice - liqA) : null;
   const distanceB = liqB != null ? Math.abs(entryPrice - liqB) : null;
   const pctA = distanceA != null && entryPrice ? (distanceA / entryPrice) * 100 : null;
   const pctB = distanceB != null && entryPrice ? (distanceB / entryPrice) * 100 : null;
 
-    const canOpenA = (balanceA - (infoA.maintenanceAmount || 0) - (infoA.safetyBuffer || 0)) >= marginRequired;
-    const canOpenB = (balanceB - (infoB.maintenanceAmount || 0) - (infoB.safetyBuffer || 0)) >= marginRequired;
+  // price range: from liquidation price up/down by 120 units depending on side
+  const RANGE_DELTA = 120;
+  const rangeAStart = liqA != null ? liqA : null;
+  const rangeAEnd = liqA != null ? (side === 'Long' ? liqA + RANGE_DELTA : liqA - RANGE_DELTA) : null;
+  const rangeBStart = liqB != null ? liqB : null;
+  const rangeBEnd = liqB != null ? (side === 'Long' ? liqB + RANGE_DELTA : liqB - RANGE_DELTA) : null;
+
+    const canOpenA = (balanceA - (infoA.maintenanceAmount || 0)) >= (infoA.marginRequired || marginRequired);
+    const canOpenB = (balanceB - (infoB.maintenanceAmount || 0)) >= (infoB.marginRequired || marginRequired);
 
     setResult({
       side,
+      sideA: side,
+      sideB: side === 'Long' ? 'Short' : 'Long',
       liqPrice: liqPrice,
       buffer: buffer,
       isSafe: infoA.isSafe && infoB.isSafe,
       canOpenA,
       canOpenB,
-      maintenanceA: infoA.maintenanceAmount,
-      maintenanceB: infoB.maintenanceAmount,
-      safetyA: infoA.safetyBuffer,
-      safetyB: infoB.safetyBuffer,
+  maintenanceA: infoA.maintenanceAmount,
+  maintenanceB: infoB.maintenanceAmount,
       effectiveA: infoA.effectiveCollateral,
       effectiveB: infoB.effectiveCollateral,
       marginRequired: infoA.marginRequired,
+      marginRequiredA: infoA.marginRequired,
+      marginRequiredB: infoB.marginRequired,
       distanceA,
       distanceB,
       pctA,
       pctB,
+      rangeAStart,
+      rangeAEnd,
+      rangeBStart,
+      rangeBEnd,
     });
   };
 
@@ -118,8 +139,8 @@ const LiquidationCalculatorModal: React.FC<LiquidationCalculatorModalProps> = ({
               <input type="number" value={maintenancePercent} onChange={(e) => setMaintenancePercent(parseFloat(e.target.value))} className="bg-gray-700 p-2 w-full rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none" />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-400 mb-1">Safety Buffer (%)</label>
-              <input type="number" value={safetyPercent} onChange={(e) => setSafetyPercent(parseFloat(e.target.value))} className="bg-gray-700 p-2 w-full rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none" />
+              <label className="block text-sm font-medium text-gray-400 mb-1">Fee Rate (%)</label>
+              <input type="number" value={feePercent} onChange={(e) => setFeePercent(parseFloat(e.target.value))} className="bg-gray-700 p-2 w-full rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none" />
             </div>
           </div>
           <div>
@@ -134,21 +155,24 @@ const LiquidationCalculatorModal: React.FC<LiquidationCalculatorModalProps> = ({
 
         {result && (
           <div className="mt-6 p-4 bg-gray-800 rounded-lg space-y-3">
-            <h4 className="text-lg font-semibold text-white">Calculation Result ({result.side})</h4>
+            <h4 className="text-lg font-semibold text-white">Calculation Result (Aivora: {result.sideA} — Bitunix: {result.sideB})</h4>
             <div className="flex justify-between items-center">
               <span className="text-gray-400">Est. Liquidation Price:</span>
               <span className="font-mono text-xl text-yellow-400">{result.liqPrice ? formatCurrency(result.liqPrice) : 'N/A'}</span>
             </div>
             <div className="grid grid-cols-1 gap-2 text-sm text-gray-300">
-              <div className="flex justify-between"><span>Margin Required:</span><span className="font-mono">{result.marginRequired ? formatCurrency(result.marginRequired) : 'N/A'}</span></div>
+              <div className="flex justify-between"><span>Aivora Margin Required:</span><span className="font-mono">{result.marginRequiredA ? formatCurrency(result.marginRequiredA) : 'N/A'}</span></div>
+              <div className="flex justify-between"><span>Bitunix Margin Required:</span><span className="font-mono">{result.marginRequiredB ? formatCurrency(result.marginRequiredB) : 'N/A'}</span></div>
               <div className="flex justify-between"><span>Aivora maintenance:</span><span className="font-mono">{result.maintenanceA ? formatCurrency(result.maintenanceA) : '-'}</span></div>
               <div className="flex justify-between"><span>Bitunix maintenance:</span><span className="font-mono">{result.maintenanceB ? formatCurrency(result.maintenanceB) : '-'}</span></div>
-              <div className="flex justify-between"><span>Aivora safety buffer:</span><span className="font-mono">{result.safetyA ? formatCurrency(result.safetyA) : '-'}</span></div>
-              <div className="flex justify-between"><span>Bitunix safety buffer:</span><span className="font-mono">{result.safetyB ? formatCurrency(result.safetyB) : '-'}</span></div>
+              {/* Safety buffer removed per user request */}
               <div className="flex justify-between"><span>Aivora effective collateral:</span><span className="font-mono">{result.effectiveA ? formatCurrency(result.effectiveA) : '-'}</span></div>
               <div className="flex justify-between"><span>Bitunix effective collateral:</span><span className="font-mono">{result.effectiveB ? formatCurrency(result.effectiveB) : '-'}</span></div>
               <div className="flex justify-between"><span>Aivora distance to liq:</span><span className="font-mono">{result.distanceA ? formatCurrency(result.distanceA) : '-' } ({result.pctA ? `${formatNumber(result.pctA,2)}%` : '-'})</span></div>
               <div className="flex justify-between"><span>Bitunix distance to liq:</span><span className="font-mono">{result.distanceB ? formatCurrency(result.distanceB) : '-' } ({result.pctB ? `${formatNumber(result.pctB,2)}%` : '-'})</span></div>
+
+              <div className="flex justify-between"><span>Aivora liq → liq±120:</span><span className="font-mono">{result.rangeAStart != null ? `${formatCurrency(result.rangeAStart)} → ${result.rangeAEnd != null ? formatCurrency(result.rangeAEnd) : '-'}` : '-'}</span></div>
+              <div className="flex justify-between"><span>Bitunix liq → liq±120:</span><span className="font-mono">{result.rangeBStart != null ? `${formatCurrency(result.rangeBStart)} → ${result.rangeBEnd != null ? formatCurrency(result.rangeBEnd) : '-'}` : '-'}</span></div>
 
               <div className={`p-3 rounded-md text-center font-bold ${result.isSafe && result.canOpenA && result.canOpenB ? 'bg-green-900/50 text-green-300' : 'bg-red-900/50 text-red-300'}`}>
                 <div className="max-h-40 overflow-auto">

@@ -35,32 +35,40 @@ export const calculateLiquidationInfo = (
   quantity: number,
   leverage: number,
   maintenancePercent: number = 0.5, // percent (e.g., 0.5 means 0.5%)
-  safetyPercent: number = 30 // percent (e.g., 30 means 30% safety buffer)
+  feeRate: number = 0.001 // fee rate as decimal (e.g., 0.001 = 0.1%)
 ) => {
   if (!balance || !entryPrice || !quantity || !leverage) {
     return { longLiq: null, shortLiq: null, buffer: null, isSafe: false };
   }
-  // Use formulas provided:
-  // For Long: liquidationPrice = entryPrice * (1 - 1/leverage + MMR)
-  // For Short: liquidationPrice = entryPrice * (1 + 1/leverage - MMR)
-  // maintenancePercent is provided as percent (e.g., 0.5 means 0.5%) -> MMR is decimal
-  const MMR = maintenancePercent / 100;
+  // New liquidation logic per user's formula:
+  // Margin Balance = Position Margin + Unrealized P/L - (Position Value * Fee Rate)
+  // We find price P where Margin Balance = 0 => liquidated.
+  // Position Margin = (entryPrice * quantity) / leverage
+  const positionMargin = (entryPrice * quantity) / leverage;
 
-  const longLiq = entryPrice * (1 - 1 / leverage + MMR);
-  const shortLiq = entryPrice * (1 + 1 / leverage - MMR);
+  // Solve for P:
+  // For Long: positionMargin + (P - entryPrice) * q - (P * q * feeRate) = 0
+  // => P * q * (1 - feeRate) = entryPrice * q - positionMargin
+  // => P = (entryPrice * q - positionMargin) / (q * (1 - feeRate))
+  // Simplifies to:
+  const longLiq = (entryPrice * quantity - positionMargin) / (quantity * (1 - feeRate));
 
-  // For compatibility keep maintenanceAmount/safetyBuffer/effectiveCollateral/marginRequired
+  // For Short: positionMargin + (entryPrice - P) * q - (P * q * feeRate) = 0
+  // => P * q * (1 + feeRate) = entryPrice * q + positionMargin
+  // => P = (entryPrice * q + positionMargin) / (q * (1 + feeRate))
+  const shortLiq = (entryPrice * quantity + positionMargin) / (quantity * (1 + feeRate));
+
+  // maintenance amount as a simple reserve based on provided maintenancePercent
   const maintenanceAmount = balance * (maintenancePercent / 100);
-  const safetyBuffer = balance * (safetyPercent / 100);
-  const effectiveCollateral = balance - maintenanceAmount - safetyBuffer;
-  const marginRequired = (entryPrice * quantity) / leverage;
+  const effectiveCollateral = balance - maintenanceAmount;
+  const marginRequired = positionMargin;
 
   // distance (absolute) from entry to liquidation price for long/short
   const bufferLong = Math.abs(entryPrice - longLiq);
   const bufferShort = Math.abs(shortLiq - entryPrice);
 
-  // isSafe: simple heuristic — effective collateral should cover margin and bufferLong/Short should be > 0
-  const isSafe = effectiveCollateral > marginRequired && (bufferLong > 0 || bufferShort > 0);
+  // isSafe: effective collateral should cover marginRequired
+  const isSafe = effectiveCollateral > marginRequired;
 
   return {
     longLiq: longLiq > 0 ? longLiq : 0,
@@ -68,7 +76,6 @@ export const calculateLiquidationInfo = (
     buffer: bufferLong,
     isSafe,
     maintenanceAmount,
-    safetyBuffer,
     effectiveCollateral,
     marginRequired,
   } as any;

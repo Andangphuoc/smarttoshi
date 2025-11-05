@@ -21,7 +21,48 @@ const AIPasteModal: React.FC<AIPasteModalProps> = ({ onParseComplete, onClose })
     setIsLoading(true);
     setError(null);
     try {
-      const parsedTrade = await parseTradeText(text);
+      let parsedTrade: Trade = await parseTradeText(text);
+
+      // If the pasted text contains a 'Closing PnL' field, prefer it as the realized pnl.
+      const lower = text.toLowerCase();
+      const hasClosing = /closing\s*pnL|closingpnl|closing pnl/i.test(text);
+      if (hasClosing) {
+        // Check if parser returned a separate closing field
+        const anyParsed: any = parsedTrade as any;
+        const possibleKeys = ['closingPnl', 'closingPNL', 'closing_pnl', 'closing_pnl', 'closingPnL', 'closing_pnl'];
+        let closingVal: any = undefined;
+        for (const k of possibleKeys) {
+          if (anyParsed[k] !== undefined && anyParsed[k] !== null) {
+            closingVal = anyParsed[k];
+            break;
+          }
+        }
+
+        // If parser didn't return closing pnl, try to extract from raw text
+        if (closingVal === undefined) {
+          const m = text.match(/Closing\s*PnL\s*[:\-\s]*([+\-]?[0-9.,]+)/i);
+          if (m && m[1]) closingVal = m[1];
+        }
+
+        if (closingVal !== undefined && closingVal !== null) {
+          // normalize number string like +126.06000000 or 1,234.56
+          const s = String(closingVal).trim();
+          const normalized = s.replace(/[^0-9+\-.,]/g, '');
+          // handle European style 1.234,56 -> 1234.56
+          const hasComma = normalized.indexOf(',') !== -1;
+          const hasDot = normalized.indexOf('.') !== -1;
+          let num = 0;
+          if (hasComma && !hasDot) {
+            num = parseFloat(normalized.replace(/\./g, '').replace(/,/g, '.'));
+          } else {
+            num = parseFloat(normalized.replace(/,/g, ''));
+          }
+          if (!isNaN(num)) {
+            parsedTrade = { ...parsedTrade, pnl: num } as Trade;
+          }
+        }
+      }
+
       onParseComplete(parsedTrade);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred.';
