@@ -56,7 +56,8 @@ const Dashboard: React.FC<DashboardProps> = ({ pairs, onEdit, onDelete, isModalO
       if (n === null || n === undefined || Number.isNaN(n)) return '';
       // format number with de-DE formatting then attach $ before without space
       const formatted = euroNumber(n, digits);
-      return `$${formatted}`;
+      // Return just the formatted number for clipboard copy (no currency symbol)
+      return formatted;
     };
 
     const formatDateTime = (iso?: string) => {
