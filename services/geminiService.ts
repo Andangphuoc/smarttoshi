@@ -70,6 +70,32 @@ Closed Qty: 3.000 ETH
 Fees: -11.54901000 USDT
 ---
 
+**Example Format 3 (Bitbaby — a Bitunix variant, Vietnamese labels):**
+---
+ETHUSDT
+Long
+Cross
+100 X
+2025-11-12 17:35:03
+3534.42
+2025-11-12 18:07:12
+3551.28
+59.97 ETH số lương
+0.000000
+-254.957695 USDT phí
++1011.031000 pnl cho tô nha
++756.073304
++31.84%
+---
+
+Notes for Format 3:
+- The quantity line may include Vietnamese words like "số lương" or "số lượng" after the number and the coin (e.g., "59.97 ETH số lương"). Extract the numeric quantity (59.97) and the coin (ETH).
+- The fee line may include the word "phí" and a negative sign; take the absolute value for the 'fee' field (e.g., "-254.957695 USDT phí" -> 254.957695).
+- The PnL line may include informal Vietnamese text (e.g., "pnl cho tô nha") and a leading plus/minus sign; prefer any field explicitly labeled 'pnl' or 'PnL' as the position PnL. If multiple numeric lines exist, choose the one containing the literal 'pnl'/'PnL' or the nearest numeric value labelled profit/loss.
+- There may be extra summary lines (like a second numeric PnL or a percent). Ignore percent fields for the 'pnl' number; only populate 'pnl' with the absolute numeric USD value (signed +/ - allowed).
+- Timestamps are in YYYY-MM-DD HH:mm:ss — convert to ISO 8601 (YYYY-MM-DDTHH:mm:ss).
+- Always return numbers as plain JSON numbers (no currency suffixes, no % signs).
+
 Here is the text to parse:
 "${text}"`;
 
