@@ -1,0 +1,5 @@
+{
+  "name": "Hedging Management Dashboard",
+  "description": "A dashboard for manually managing hedging trades between two exchanges. It allows manual entry of all parameters, risk and capital management, and includes a language detection widget powered by Gemini.",
+  "requestFramePermissions": []
+}
