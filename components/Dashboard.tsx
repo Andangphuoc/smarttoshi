@@ -23,8 +23,7 @@ const Dashboard: React.FC<DashboardProps> = ({ pairs, onEdit, onDelete, onQuickC
   const handleCopyTrade = (trade: Trade) => {
     const text = formatTradeToClipboard(trade);
     navigator.clipboard.writeText(text).then(() => {
-        // Optional: Could show a toast notification here
-        alert("Trade details copied to clipboard!");
+        // Alert removed as per request
     }).catch(err => {
         console.error("Failed to copy: ", err);
     });
