@@ -1,7 +1,7 @@
 import { Trade } from '../types';
 import { parseTradeText as parseWithGemini } from './geminiService';
 
-// Helper to parse numbers, handling both 1,234.56 and 1.234,56 formats
+// Helper to parse numbers, handling both 1,234.56 and 1.234,56 and 2930,63 formats
 const parseNumber = (str: string): number => {
   if (!str) return 0;
   
@@ -30,11 +30,20 @@ const parseNumber = (str: string): number => {
           cleaned = cleaned.replace(/,/g, '');
       }
   } else if (lastCommaIndex > -1) {
-      // Only commas. 1,234 -> 1234. 
-      // In crypto contexts, if we have 3 digits after comma, it's usually a thousand separator.
-      // If we have 1 or 2 digits, it might be a decimal comma (European).
-      // However, simplified rule for safety: Remove commas (American standard default).
-      cleaned = cleaned.replace(/,/g, '');
+      // Only commas present (e.g. "2930,63" or "1,234")
+      const parts = cleaned.split(',');
+      const lastPart = parts[parts.length - 1];
+
+      // Heuristic: If the digits after the last comma are NOT 3, it's likely a decimal separator.
+      // E.g.: "2930,63" (2 digits) -> Decimal. "0,5" (1 digit) -> Decimal.
+      // "1,234" (3 digits) -> Thousand separator (American default).
+      if (lastPart.length !== 3) {
+           // Treat as European Decimal: Replace comma with dot
+           cleaned = cleaned.replace(/,/g, '.');
+      } else {
+           // Treat as American Thousand Separator: Remove comma
+           cleaned = cleaned.replace(/,/g, '');
+      }
   }
   
   return (isNegative ? -1 : 1) * parseFloat(cleaned);
@@ -138,14 +147,14 @@ const parseFormatAivoraGrid = (text: string): Partial<Trade> | null => {
     console.log("Detected Format Aivora Grid");
     const trade: Partial<Trade> = { leverage: 100 };
 
-    // --- CASE 1: Format 2 (Stacked Headers with "Realized PnL" separator) ---
-    // Characteristics: "Open Time" then "Opening Average Price" then "Close Time" appear before values.
-    // Or "Fees", "Position PnL", "Realized PnL" appear before values.
-    const isFormat2 = text.includes('Realized PnL');
+    // Discriminator: Check what comes after "Opening Average Price"
+    // Format B (Stacked): "Opening Average Price" followed closely by "Close Time" (header)
+    // Regex explanation: Look for Open Time -> Opening Price -> Close Time.
+    const isFormatStacked = /Open Time\s*\n\s*Opening Average Price\s*\n\s*Close Time/i.test(text);
 
-    if (isFormat2) {
-        console.log("-> Sub-format: Stacked/Disjointed (Format 2)");
-
+    if (isFormatStacked) {
+        console.log("-> Sub-format: Stacked (Headers grouped)");
+        
         // 1. Open/Close Time/Price Stack
         // Open Time \n Opening Average Price \n Close Time \n [OpenDate] \n [OpenPrice] \n [CloseDate]
         const headerStackMatch = text.match(/Open Time\s*\n\s*Opening Average Price\s*\n\s*Close Time\s*\n\s*(\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2})\s*\n\s*([\d.,]+)\s*\n\s*(\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2})/i);
@@ -175,32 +184,35 @@ const parseFormatAivoraGrid = (text: string): Partial<Trade> | null => {
         }
 
     } else {
-        // --- CASE 2: Format 1 (Sequential Interleaved) ---
-        console.log("-> Sub-format: Sequential (Format 1)");
+        console.log("-> Sub-format: Sequential (Header-Value pairs)");
 
-        // Open Time \n Opening Average Price \n 2025... \n 2930...
+        // 1. Open Block
+        // Open Time \n Opening Average Price \n [Date] \n [Price]
         const openBlock = text.match(/Open Time\s*\n\s*Opening Average Price\s*\n\s*(\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2})\s*\n\s*([\d.,]+)/i);
         if (openBlock) {
             trade.openTime = openBlock[1].replace(' ', 'T');
             trade.openPrice = parseNumber(openBlock[2]);
         }
 
-        // Close Time \n Closing Average Price \n 2025... \n 2926...
+        // 2. Close Block
+        // Close Time \n Closing Average Price \n [Date] \n [Price]
         const closeBlock = text.match(/Close Time\s*\n\s*Closing Average Price\s*\n\s*(\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2})\s*\n\s*([\d.,]+)/i);
         if (closeBlock) {
             trade.closeTime = closeBlock[1].replace(' ', 'T');
             trade.closePrice = parseNumber(closeBlock[2]);
         }
 
-        // Position Size \n Funding Fee \n QTY COIN \n FEE
+        // 3. Quantity Block
+        // Position Size \n Funding Fee \n [Qty Coin] \n [Funding]
         const qtyBlock = text.match(/Position Size\s*\n\s*Funding Fee\s*\n\s*([\d.,]+)\s*([A-Z]+)/i);
         if (qtyBlock) {
             trade.quantity = parseNumber(qtyBlock[1]);
             trade.coin = qtyBlock[2];
         }
 
+        // 4. Fee/PnL Block
         // Fees \n Position PnL \n [FeeValue] [Unit?] \n [PnLValue] [Unit?]
-        // Does NOT have "Realized PnL" in between
+        // Does NOT expect "Realized PnL" in between header and value
         const feePnlBlock = text.match(/Fees\s*\n\s*Position PnL\s*\n\s*([-\d.,]+)[^\n]*\n\s*([+-\d.,]+)/i);
         if (feePnlBlock) {
             trade.fee = Math.abs(parseNumber(feePnlBlock[1]));
