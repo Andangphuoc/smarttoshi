@@ -130,6 +130,95 @@ const parseFormatVN = (text: string): Partial<Trade> | null => {
     return trade;
 };
 
+// --- New: Aivora Grid (Interleaved Headers/Values) ---
+const parseFormatAivoraGrid = (text: string): Partial<Trade> | null => {
+    // Check for essential Aivora keywords
+    if (!text.includes('Open Time') || !text.includes('Opening Average Price')) return null;
+
+    console.log("Detected Format Aivora Grid");
+    const trade: Partial<Trade> = { leverage: 100 };
+
+    // --- CASE 1: Format 2 (Stacked Headers with "Realized PnL" separator) ---
+    // Characteristics: "Open Time" then "Opening Average Price" then "Close Time" appear before values.
+    // Or "Fees", "Position PnL", "Realized PnL" appear before values.
+    const isFormat2 = text.includes('Realized PnL');
+
+    if (isFormat2) {
+        console.log("-> Sub-format: Stacked/Disjointed (Format 2)");
+
+        // 1. Open/Close Time/Price Stack
+        // Open Time \n Opening Average Price \n Close Time \n [OpenDate] \n [OpenPrice] \n [CloseDate]
+        const headerStackMatch = text.match(/Open Time\s*\n\s*Opening Average Price\s*\n\s*Close Time\s*\n\s*(\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2})\s*\n\s*([\d.,]+)\s*\n\s*(\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2})/i);
+        
+        if (headerStackMatch) {
+            trade.openTime = headerStackMatch[1].replace(' ', 'T');
+            trade.openPrice = parseNumber(headerStackMatch[2]);
+            trade.closeTime = headerStackMatch[3].replace(' ', 'T');
+        }
+
+        // 2. Closing Price & Quantity Stack
+        // Closing Average Price \n Position Size \n Funding Fee \n [ClosePrice] \n [Qty Coin]
+        const closeStackMatch = text.match(/Closing Average Price\s*\n\s*Position Size\s*\n\s*Funding Fee\s*\n\s*([\d.,]+)\s*\n\s*([\d.,]+)\s*([A-Z]+)/i);
+        if (closeStackMatch) {
+            trade.closePrice = parseNumber(closeStackMatch[1]);
+            trade.quantity = parseNumber(closeStackMatch[2]);
+            trade.coin = closeStackMatch[3];
+        }
+
+        // 3. Fee & PnL Stack
+        // Fees \n Position PnL \n Realized PnL \n [Fee] \n [PnL]
+        // Note: The [^\n]* consumes " USDT" or similar on the fee line
+        const feePnlMatch = text.match(/Fees\s*\n\s*Position PnL\s*\n\s*Realized PnL\s*\n\s*([-\d.,]+)[^\n]*\n\s*([+-\d.,]+)/i);
+        if (feePnlMatch) {
+            trade.fee = Math.abs(parseNumber(feePnlMatch[1]));
+            trade.pnl = parseNumber(feePnlMatch[2]);
+        }
+
+    } else {
+        // --- CASE 2: Format 1 (Sequential Interleaved) ---
+        console.log("-> Sub-format: Sequential (Format 1)");
+
+        // Open Time \n Opening Average Price \n 2025... \n 2930...
+        const openBlock = text.match(/Open Time\s*\n\s*Opening Average Price\s*\n\s*(\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2})\s*\n\s*([\d.,]+)/i);
+        if (openBlock) {
+            trade.openTime = openBlock[1].replace(' ', 'T');
+            trade.openPrice = parseNumber(openBlock[2]);
+        }
+
+        // Close Time \n Closing Average Price \n 2025... \n 2926...
+        const closeBlock = text.match(/Close Time\s*\n\s*Closing Average Price\s*\n\s*(\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2})\s*\n\s*([\d.,]+)/i);
+        if (closeBlock) {
+            trade.closeTime = closeBlock[1].replace(' ', 'T');
+            trade.closePrice = parseNumber(closeBlock[2]);
+        }
+
+        // Position Size \n Funding Fee \n QTY COIN \n FEE
+        const qtyBlock = text.match(/Position Size\s*\n\s*Funding Fee\s*\n\s*([\d.,]+)\s*([A-Z]+)/i);
+        if (qtyBlock) {
+            trade.quantity = parseNumber(qtyBlock[1]);
+            trade.coin = qtyBlock[2];
+        }
+
+        // Fees \n Position PnL \n [FeeValue] [Unit?] \n [PnLValue] [Unit?]
+        // Does NOT have "Realized PnL" in between
+        const feePnlBlock = text.match(/Fees\s*\n\s*Position PnL\s*\n\s*([-\d.,]+)[^\n]*\n\s*([+-\d.,]+)/i);
+        if (feePnlBlock) {
+            trade.fee = Math.abs(parseNumber(feePnlBlock[1]));
+            trade.pnl = parseNumber(feePnlBlock[2]);
+        }
+    }
+
+    // Common Fallbacks
+    if (!trade.coin) {
+        const coinMatch = text.match(/^([A-Z]+)USDT/i);
+        if (coinMatch) trade.coin = coinMatch[1];
+    }
+    const levMatch = text.match(/(\d+)X/);
+    if (levMatch) trade.leverage = parseInt(levMatch[1], 10);
+
+    return trade;
+};
+
 // --- 2. Format Aivora English (Standard & Columnar) ---
 const parseFormatAivoraEn = (text: string): Partial<Trade> | null => {
   if (!text.includes('Opening Average Price')) return null;
@@ -194,6 +283,59 @@ const parseFormatAivoraEn = (text: string): Partial<Trade> | null => {
 
   return trade;
 };
+
+// --- New: Aivora Vertical (Mobile/Card View) ---
+const parseFormatAivoraVertical = (text: string): Partial<Trade> | null => {
+    if (!text.includes('Time Opened') && !text.includes('Max held')) return null;
+
+    console.log("Detected Format Aivora Vertical");
+    const trade: Partial<Trade> = { leverage: 100 };
+
+    // Coin: Try to match starting pattern like "ETHUSDT" or check under Qty
+    const coinMatch = text.match(/^([A-Z]+)USDT/i);
+    if (coinMatch) trade.coin = coinMatch[1];
+    
+    // Leverage "100X"
+    const levMatch = text.match(/(\d+)X/);
+    if (levMatch) trade.leverage = parseInt(levMatch[1], 10);
+
+    // Open Time
+    const openTimeMatch = text.match(/Time Opened\s*\n\s*(\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2})/i);
+    if (openTimeMatch) trade.openTime = openTimeMatch[1].replace(' ', 'T');
+    
+    // Entry Price
+    const entryMatch = text.match(/Entry Price\s*\n\s*([\d.,]+)/i);
+    if (entryMatch) trade.openPrice = parseNumber(entryMatch[1]);
+    
+    // Close Time
+    const closeTimeMatch = text.match(/Time Closed\s*\n\s*(\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2})/i);
+    if (closeTimeMatch) trade.closeTime = closeTimeMatch[1].replace(' ', 'T');
+
+    // Close Price
+    const closePriceMatch = text.match(/Close Price\s*\n\s*([\d.,]+)/i);
+    if (closePriceMatch) trade.closePrice = parseNumber(closePriceMatch[1]);
+
+    // Qty: "Max held\n50.000" or "Closed Qty.\n50.000"
+    const qtyMatch = text.match(/(?:Max held|Closed Qty\.?)\s*\n\s*([\d.,]+)/i);
+    if (qtyMatch) trade.quantity = parseNumber(qtyMatch[1]);
+    
+    // Attempt to find coin if not found at top, usually under Qty (Max held \n val \n COIN)
+    if (!trade.coin) {
+         const coinUnderQty = text.match(/(?:Max held|Closed Qty\.?)\s*\n\s*[\d.,]+\s*\n\s*([A-Z]+)/i);
+         if (coinUnderQty) trade.coin = coinUnderQty[1];
+    }
+
+    // PnL
+    const pnlMatch = text.match(/Position PnL\s*\n\s*([+-\d.,]+)/i);
+    if (pnlMatch) trade.pnl = parseNumber(pnlMatch[1]);
+
+    // Fee (Optional)
+    const feeMatch = text.match(/Fees?\s*\n\s*([-\d.,]+)/i);
+    if (feeMatch) trade.fee = Math.abs(parseNumber(feeMatch[1]));
+
+    return trade;
+};
+
 
 // --- 3. Format C: Generic Fixed ---
 const parseFormatFixed = (text: string): Partial<Trade> | null => {
@@ -273,10 +415,12 @@ const parseFormatBitunix = (text: string): Partial<Trade> | null => {
 
 // Main smart parser function
 export async function parseTradeTextSmart(text: string): Promise<Trade> {
-  // Priority: Tabular -> VN -> Aivora En -> Fixed -> Bitunix -> Gemini
+  // Priority: Tabular -> VN -> Aivora Grid (Dual Formats) -> Aivora Vertical -> Aivora En -> Fixed -> Bitunix -> Gemini
   const smartParse = 
     parseFormatTabular(text) ||
     parseFormatVN(text) || 
+    parseFormatAivoraGrid(text) || 
+    parseFormatAivoraVertical(text) ||
     parseFormatAivoraEn(text) || 
     parseFormatFixed(text) || 
     parseFormatBitunix(text);
